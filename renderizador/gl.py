@@ -31,6 +31,7 @@ class GL:
         GL.height = height
         GL.near = near
         GL.far = far
+        GL.projection_view_matrix = np.identity(4)
 
     @staticmethod
     def polypoint2D(point, colors):
@@ -178,12 +179,44 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        def draw_line(x1, y1, x2, y2, color):
+            dx = x2 - x1
+            dy = y2 - y1
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+            steps = abs(dx) if abs(dx) > abs(dy) else abs(dy)
+
+            x_inc = dx / steps
+            y_inc = dy / steps
+
+            for i in range(int(steps)):
+                if 0 <= int(x1) < GL.width and 0 <= int(y1) < GL.height:
+                    gpu.GPU.draw_pixel([int(x1), int(y1)], gpu.GPU.RGB8, color)
+                x1 += x_inc
+                y1 += y_inc
+        color = [int(255 * colors["emissiveColor"][0]),
+                int(255 * colors["emissiveColor"][1]),
+                int(255 * colors["emissiveColor"][2])]
+        
+        for i in range(0, len(point), 9):
+            p1 = np.array([point[i], point[i + 1], point[i + 2], 1.0])
+            p2 = np.array([point[i + 3], point[i + 4], point[i + 5], 1.0])
+            p3 = np.array([point[i + 6], point[i + 7], point[i + 8], 1.0])
+
+            p1_transformed = np.dot(GL.projection_view_matrix, p1)
+            p2_transformed = np.dot(GL.projection_view_matrix, p2)
+            p3_transformed = np.dot(GL.projection_view_matrix, p3)
+
+            p1_ndc = p1_transformed / p1_transformed[3]
+            p2_ndc = p2_transformed / p2_transformed[3]
+            p3_ndc = p3_transformed / p3_transformed[3]
+
+            p1_screen = [(p1_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p1_ndc[1] * 0.5 + 0.5)) * GL.height]
+            p2_screen = [(p2_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p2_ndc[1] * 0.5 + 0.5)) * GL.height]
+            p3_screen = [(p3_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p3_ndc[1] * 0.5 + 0.5)) * GL.height]
+
+            draw_line(p1_screen[0], p1_screen[1], p2_screen[0], p2_screen[1], color)
+            draw_line(p2_screen[0], p2_screen[1], p3_screen[0], p3_screen[1], color)
+            draw_line(p3_screen[0], p3_screen[1], p1_screen[0], p1_screen[1], color)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -192,11 +225,38 @@ class GL:
         # câmera virtual. Use esses dados para poder calcular e criar a matriz de projeção
         # perspectiva para poder aplicar nos pontos dos objetos geométricos.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Viewpoint : ", end='')
-        print("position = {0} ".format(position), end='')
-        print("orientation = {0} ".format(orientation), end='')
-        print("fieldOfView = {0} ".format(fieldOfView))
+        aspect_ratio = GL.width / GL.height
+        fov_normalized = 1.0 / math.tan(fieldOfView / 2)
+        z_range = GL.far - GL.near
+
+        perspective_matrix = np.array([
+            [fov_normalized / aspect_ratio, 0, 0, 0],
+            [0, fov_normalized, 0, 0],
+            [0, 0, -((GL.far + GL.near) / z_range), -1],
+            [0, 0, -((2 * GL.far * GL.near) / z_range), 0]
+        ])
+
+        translacao = np.array([
+            [1, 0, 0, -position[0]],
+            [0, 1, 0, -position[1]],
+            [0, 0, 1, -position[2]],
+            [0, 0, 0, 1]
+        ])
+
+        x, y, z, w = orientation
+        c = math.cos(w)
+        s = math.sin(w)
+
+        rotation_matrix = np.array([
+            [c + x*x*(1-c), x*y*(1-c) - z*s, x*z*(1-c) + y*s, 0],
+            [y*x*(1-c) + z*s, c + y*y*(1-c), y*z*(1-c) - x*s, 0],
+            [z*x*(1-c) - y*s, z*y*(1-c) + x*s, c + z*z*(1-c), 0],
+            [0, 0, 0, 1]
+        ])
+
+        view_matrix = np.dot(translacao, rotation_matrix)
+        GL.projection_view_matrix = np.dot(perspective_matrix, view_matrix)
+
 
     @staticmethod
     def transform_in(translation, scale, rotation):
