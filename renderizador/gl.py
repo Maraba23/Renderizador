@@ -23,6 +23,7 @@ class GL:
     height = 600  # altura da tela
     near = 0.01   # plano de corte próximo
     far = 1000    # plano de corte distante
+    transformation_stack = [] # pilha de transformações
 
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
@@ -269,15 +270,52 @@ class GL:
         # Quando se entrar em um nó transform se deverá salvar a matriz de transformação dos
         # modelos do mundo em alguma estrutura de pilha.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Transform : ", end='')
-        if translation:
-            print("translation = {0} ".format(translation), end='') # imprime no terminal
+        # Matriz identidade como ponto de partida
+        transformation_matrix = np.identity(4)
+
+        # Aplicando escala
         if scale:
-            print("scale = {0} ".format(scale), end='') # imprime no terminal
+            scale_matrix = np.array([
+                [scale[0], 0, 0, 0],
+                [0, scale[1], 0, 0],
+                [0, 0, scale[2], 0],
+                [0, 0, 0, 1]
+            ])
+            transformation_matrix = np.dot(transformation_matrix, scale_matrix)
+
+        # Aplicando rotação
         if rotation:
-            print("rotation = {0} ".format(rotation), end='') # imprime no terminal
-        print("")
+            x, y, z, angle = rotation
+            c = np.cos(angle)
+            s = np.sin(angle)
+            t = 1 - c
+
+            rotation_matrix = np.array([
+                [t*x*x + c, t*x*y - s*z, t*x*z + s*y, 0],
+                [t*x*y + s*z, t*y*y + c, t*y*z - s*x, 0],
+                [t*x*z - s*y, t*y*z + s*x, t*z*z + c, 0],
+                [0, 0, 0, 1]
+            ])
+            transformation_matrix = np.dot(transformation_matrix, rotation_matrix)
+
+        # Aplicando translação
+        if translation:
+            translation_matrix = np.array([
+                [1, 0, 0, translation[0]],
+                [0, 1, 0, translation[1]],
+                [0, 0, 1, translation[2]],
+                [0, 0, 0, 1]
+            ])
+            transformation_matrix = np.dot(transformation_matrix, translation_matrix)
+
+        # Empilhando a transformação
+        if GL.transformation_stack:
+            # Multiplica a nova transformação pela anterior (topo da pilha)
+            top_matrix = GL.transformation_stack[-1]
+            transformation_matrix = np.dot(top_matrix, transformation_matrix)
+
+        # Empilha a matriz transformada
+        GL.transformation_stack.append(transformation_matrix)
 
     @staticmethod
     def transform_out():
@@ -287,8 +325,8 @@ class GL:
         # deverá recuperar a matriz de transformação dos modelos do mundo da estrutura de
         # pilha implementada.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Saindo de Transform")
+        if GL.transformation_stack:
+            GL.transformation_stack.pop()
 
     @staticmethod
     def triangleStripSet(point, stripCount, colors):
