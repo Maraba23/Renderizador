@@ -25,6 +25,7 @@ class GL:
     far = 1000    # plano de corte distante
     transformation_stack = [] # pilha de transformações
 
+
     @staticmethod
     def setup(width, height, near=0.01, far=1000):
         """Definr parametros para câmera de razão de aspecto, plano próximo e distante."""
@@ -32,7 +33,8 @@ class GL:
         GL.height = height
         GL.near = near
         GL.far = far
-        GL.projection_view_matrix = np.identity(4)
+        GL.view_matrix = np.identity(4)
+        GL.perspective_matrix = np.identity(4)
 
     @staticmethod
     def polypoint2D(point, colors):
@@ -180,42 +182,30 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
 
-        def draw_line(x1, y1, x2, y2, color):
-            dx = x2 - x1
-            dy = y2 - y1
+        pontos = []
+        for i in range(0, len(point)-2, 3):
+            p = np.array([[point[i]], [point[i+1]], [point[i+2]], [1]])
 
-            steps = abs(dx) if abs(dx) > abs(dy) else abs(dy)
+            transform_matrix = GL.transformation_stack[-1]
+            p_transform = transform_matrix @ p
 
-            x_inc = dx / steps
-            y_inc = dy / steps
+            p_view = GL.view_matrix @ p_transform
 
-            for i in range(int(steps)):
-                if 0 <= int(x1) < GL.width and 0 <= int(y1) < GL.height:
-                    gpu.GPU.draw_pixel([int(x1), int(y1)], gpu.GPU.RGB8, color)
-                x1 += x_inc
-                y1 += y_inc
-        color = [int(255 * colors["emissiveColor"][0]),
-                int(255 * colors["emissiveColor"][1]),
-                int(255 * colors["emissiveColor"][2])]
-        
-        for i in range(0, len(point), 9):
-            p1 = np.array([point[i], point[i + 1], point[i + 2], 1.0])
-            p2 = np.array([point[i + 3], point[i + 4], point[i + 5], 1.0])
-            p3 = np.array([point[i + 6], point[i + 7], point[i + 8], 1.0])
+            p_perspective = GL.perspective_matrix @ p_view
+            p_normalized = p_perspective / p_perspective[3]
 
-            view_transform = GL.projection_view_matrix @ GL.transformation_stack[-1]
-            
-            p1 = view_transform @ p1
-            p2 = view_transform @ p2
-            p3 = view_transform @ p3
+            map_matrix = np.array([
+                [GL.width/2, 0, 0, GL.width/2],
+                [0, -GL.height/2, 0, GL.height/2],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1]
+            ])
 
-            p1 = p1 / p1[3]
-            p2 = p2 / p2[3]
-            p3 = p3 / p3[3]
+            p_screen = map_matrix @ p_normalized
+            pontos.append(p_screen[0][0])
+            pontos.append(p_screen[1][0])
 
-
-
-
+        GL.triangleSet2D(pontos, colors)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -224,38 +214,43 @@ class GL:
         # câmera virtual. Use esses dados para poder calcular e criar a matriz de projeção
         # perspectiva para poder aplicar nos pontos dos objetos geométricos.
 
-        aspect_ratio = GL.width / GL.height
-        fov_normalized = 1.0 / math.tan(fieldOfView / 2)
-        z_range = GL.far - GL.near
-
-        perspective_matrix = np.array([
-            [fov_normalized / aspect_ratio, 0, 0, 0],
-            [0, fov_normalized, 0, 0],
-            [0, 0, -((GL.far + GL.near) / z_range), -1],
-            [0, 0, -((2 * GL.far * GL.near) / z_range), 0]
+        translation_matrix = np.array([
+            [1,0,0,-position[0]],
+            [0,1,0,-position[1]],
+            [0,0,1,-position[2]],
+            [0,0,0,1]
         ])
 
-        translacao = np.array([
-            [1, 0, 0, -position[0]],
-            [0, 1, 0, -position[1]],
-            [0, 0, 1, -position[2]],
-            [0, 0, 0, 1]
-        ])
-
-        x, y, z, w = orientation
-        c = math.cos(w)
-        s = math.sin(w)
+        x, y, z, w = orientation[0], orientation[1], orientation[2], orientation[3]/2
+        mag = math.sqrt(x*x + y*y + z*z)
+        x, y, z = x/mag, y/mag, z/mag
+        escalar = math.cos(w)
+        v_x = x*math.sin(w)
+        v_y = y*math.sin(w)
+        v_z = z*math.sin(w)
 
         rotation_matrix = np.array([
-            [c + x*x*(1-c), x*y*(1-c) - z*s, x*z*(1-c) + y*s, 0],
-            [y*x*(1-c) + z*s, c + y*y*(1-c), y*z*(1-c) - x*s, 0],
-            [z*x*(1-c) - y*s, z*y*(1-c) + x*s, c + z*z*(1-c), 0],
+            [1 - 2*(v_y**2 + v_z**2), 2*(v_x*v_y - v_z*escalar), 2*(v_x*v_z + v_y*escalar), 0],
+            [2*(v_x*v_y + v_z*escalar), 1 - 2*(v_x**2 + v_z**2), 2*(v_y*v_z - v_x*escalar), 0],
+            [2*(v_x*v_z - v_y*escalar), 2*(v_y*v_z + v_x*escalar), 1 - 2*(v_x**2 + v_y**2), 0],
             [0, 0, 0, 1]
         ])
+        inv_rotation_matrix = np.linalg.inv(rotation_matrix)
 
-        view_matrix = np.linalg.inv(rotation_matrix) @ translacao
-        GL.projection_view_matrix = perspective_matrix @ view_matrix
+        view_matrix = inv_rotation_matrix @ translation_matrix
 
+        fovy = 2*math.atan(math.tan(fieldOfView/2)*(GL.height/math.sqrt(GL.height**2 + GL.width**2)))
+        top = GL.near*math.tan(fovy)
+        right = top*(GL.width/GL.height)
+        perspective_matrix = np.array([
+            [GL.near/right, 0, 0, 0],
+            [0, GL.near/top, 0, 0],
+            [0, 0, -(GL.far + GL.near)/(GL.far - GL.near), -2*GL.far*GL.near/(GL.far - GL.near)],
+            [0, 0, -1, 0]
+        ])
+        
+        GL.view_matrix = view_matrix
+        GL.perspective_matrix = perspective_matrix
 
     @staticmethod
     def transform_in(translation, scale, rotation):
@@ -268,52 +263,36 @@ class GL:
         # Quando se entrar em um nó transform se deverá salvar a matriz de transformação dos
         # modelos do mundo em alguma estrutura de pilha.
 
-        # Matriz identidade como ponto de partida
-        transformation_matrix = np.identity(4)
+        translation_matrix = np.array([
+            [1, 0, 0, translation[0]],
+            [0, 1, 0, translation[1]],
+            [0, 0, 1, translation[2]],
+            [0, 0, 0, 1]
+        ])
 
-        # Aplicando escala
-        if scale:
-            scale_matrix = np.array([
-                [scale[0], 0, 0, 0],
-                [0, scale[1], 0, 0],
-                [0, 0, scale[2], 0],
-                [0, 0, 0, 1]
-            ])
-            transformation_matrix = transformation_matrix @ scale_matrix
+        scale_matrix = np.array([
+            [scale[0], 0, 0, 0],
+            [0, scale[1], 0, 0],
+            [0, 0, scale[2], 0],
+            [0, 0, 0, 1]
+        ])
+        
+        x, y, z, w = rotation[0], rotation[1], rotation[2], rotation[3]/2
+        mag = math.sqrt(x*x + y*y + z*z)
+        x, y, z = x/mag, y/mag, z/mag
+        escalar = math.cos(w)
+        v_x = x*math.sin(w)
+        v_y = y*math.sin(w)
+        v_z = z*math.sin(w)
 
-        # Aplicando rotação
-        if rotation:
-            x, y, z, angle = rotation
-            c = np.cos(angle)
-            s = np.sin(angle)
-            t = 1 - c
-
-            rotation_matrix = np.array([
-                [t*x*x + c, t*x*y - s*z, t*x*z + s*y, 0],
-                [t*x*y + s*z, t*y*y + c, t*y*z - s*x, 0],
-                [t*x*z - s*y, t*y*z + s*x, t*z*z + c, 0],
-                [0, 0, 0, 1]
-            ])
-            transformation_matrix = transformation_matrix @ rotation_matrix
-
-        # Aplicando translação
-        if translation:
-            translation_matrix = np.array([
-                [1, 0, 0, translation[0]],
-                [0, 1, 0, translation[1]],
-                [0, 0, 1, translation[2]],
-                [0, 0, 0, 1]
-            ])
-            transformation_matrix = transformation_matrix @ translation_matrix
-
-        # Empilhando a transformação
-        if GL.transformation_stack:
-            # Multiplica a nova transformação pela anterior (topo da pilha)
-            top_matrix = GL.transformation_stack[-1]
-            transformation_matrix = top_matrix @ transformation_matrix
-
-        # Empilha a matriz transformada
-        GL.transformation_stack.append(transformation_matrix)
+        rotation_matrix = np.array([
+            [1 - 2*(v_y**2 + v_z**2), 2*(v_x*v_y - v_z*escalar), 2*(v_x*v_z + v_y*escalar), 0],
+            [2*(v_x*v_y + v_z*escalar), 1 - 2*(v_x**2 + v_z**2), 2*(v_y*v_z - v_x*escalar), 0],
+            [2*(v_x*v_z - v_y*escalar), 2*(v_y*v_z + v_x*escalar), 1 - 2*(v_x**2 + v_y**2), 0],
+            [0, 0, 0, 1]
+        ])
+        
+        GL.transformation_stack.append(translation_matrix @ rotation_matrix @ scale_matrix)
 
     @staticmethod
     def transform_out():
