@@ -203,21 +203,19 @@ class GL:
             p2 = np.array([point[i + 3], point[i + 4], point[i + 5], 1.0])
             p3 = np.array([point[i + 6], point[i + 7], point[i + 8], 1.0])
 
-            p1_transformed = np.dot(GL.projection_view_matrix, p1)
-            p2_transformed = np.dot(GL.projection_view_matrix, p2)
-            p3_transformed = np.dot(GL.projection_view_matrix, p3)
+            view_transform = GL.projection_view_matrix @ GL.transformation_stack[-1]
+            
+            p1 = view_transform @ p1
+            p2 = view_transform @ p2
+            p3 = view_transform @ p3
 
-            p1_ndc = p1_transformed / p1_transformed[3]
-            p2_ndc = p2_transformed / p2_transformed[3]
-            p3_ndc = p3_transformed / p3_transformed[3]
+            p1 = p1 / p1[3]
+            p2 = p2 / p2[3]
+            p3 = p3 / p3[3]
 
-            p1_screen = [(p1_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p1_ndc[1] * 0.5 + 0.5)) * GL.height]
-            p2_screen = [(p2_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p2_ndc[1] * 0.5 + 0.5)) * GL.height]
-            p3_screen = [(p3_ndc[0] * 0.5 + 0.5) * GL.width, (1 - (p3_ndc[1] * 0.5 + 0.5)) * GL.height]
 
-            draw_line(p1_screen[0], p1_screen[1], p2_screen[0], p2_screen[1], color)
-            draw_line(p2_screen[0], p2_screen[1], p3_screen[0], p3_screen[1], color)
-            draw_line(p3_screen[0], p3_screen[1], p1_screen[0], p1_screen[1], color)
+
+
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -255,8 +253,8 @@ class GL:
             [0, 0, 0, 1]
         ])
 
-        view_matrix = np.dot(translacao, rotation_matrix)
-        GL.projection_view_matrix = np.dot(perspective_matrix, view_matrix)
+        view_matrix = np.linalg.inv(rotation_matrix) @ translacao
+        GL.projection_view_matrix = perspective_matrix @ view_matrix
 
 
     @staticmethod
@@ -281,7 +279,7 @@ class GL:
                 [0, 0, scale[2], 0],
                 [0, 0, 0, 1]
             ])
-            transformation_matrix = np.dot(transformation_matrix, scale_matrix)
+            transformation_matrix = transformation_matrix @ scale_matrix
 
         # Aplicando rotação
         if rotation:
@@ -296,7 +294,7 @@ class GL:
                 [t*x*z - s*y, t*y*z + s*x, t*z*z + c, 0],
                 [0, 0, 0, 1]
             ])
-            transformation_matrix = np.dot(transformation_matrix, rotation_matrix)
+            transformation_matrix = transformation_matrix @ rotation_matrix
 
         # Aplicando translação
         if translation:
@@ -306,13 +304,13 @@ class GL:
                 [0, 0, 1, translation[2]],
                 [0, 0, 0, 1]
             ])
-            transformation_matrix = np.dot(transformation_matrix, translation_matrix)
+            transformation_matrix = transformation_matrix @ translation_matrix
 
         # Empilhando a transformação
         if GL.transformation_stack:
             # Multiplica a nova transformação pela anterior (topo da pilha)
             top_matrix = GL.transformation_stack[-1]
-            transformation_matrix = np.dot(top_matrix, transformation_matrix)
+            transformation_matrix = top_matrix @ transformation_matrix
 
         # Empilha a matriz transformada
         GL.transformation_stack.append(transformation_matrix)
