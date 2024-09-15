@@ -319,15 +319,33 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleStripSet : pontos = {0} ".format(point), end='')
-        for i, strip in enumerate(stripCount):
-            print("strip[{0}] = {1} ".format(i, strip), end='')
-        print("")
-        print("TriangleStripSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        index = 0
+        vertices = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        for count in stripCount:
+            num_vertices = count
+            if num_vertices < 3:
+                index += num_vertices * 3
+                continue
+
+            strip_points = point[index : index + num_vertices * 3]
+            index += num_vertices * 3
+
+            v0 = strip_points[0:3]
+            v1 = strip_points[3:6]
+
+            for i in range(2, num_vertices):
+                v2 = strip_points[i*3 : i*3 + 3]
+
+                if (i % 2 == 0):
+                    vertices.extend(v0 + v1 + v2)
+                else:
+                    vertices.extend(v0 + v2 + v1)
+
+                v0 = v1
+                v1 = v2
+
+        GL.triangleSet(vertices, colors)
 
     @staticmethod
     def indexedTriangleStripSet(point, index, colors):
@@ -344,12 +362,42 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedTriangleStripSet : pontos = {0}, index = {1}".format(point, index))
-        print("IndexedTriangleStripSet : colors = {0}".format(colors)) # imprime as cores
+        vertices = []
+        strip_indices = []
+        current_strip = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        for i in index:
+            if i == -1:
+                if len(current_strip) >= 3:
+                    strip_indices.append(current_strip)
+                current_strip = []
+            else:
+                current_strip.append(i)
+
+        if len(current_strip) >= 3:
+            strip_indices.append(current_strip)
+
+        for strip in strip_indices:
+            num_vertices = len(strip)
+            if num_vertices < 3:
+                continue
+
+            v0 = strip[0]
+            v1 = strip[1]
+
+            for j in range(2, num_vertices):
+                v2 = strip[j]
+
+                if (j % 2 == 0):
+                    vertices.extend(point[v0*3 : v0*3+3] + point[v1*3 : v1*3+3] + point[v2*3 : v2*3+3])
+                else:
+                    vertices.extend(point[v0*3 : v0*3+3] + point[v2*3 : v2*3+3] + point[v1*3 : v1*3+3])
+
+                v0 = v1
+                v1 = v2
+
+        # Chamar a função triangleSet para renderizar os triângulos
+        GL.triangleSet(vertices, colors)
 
     @staticmethod
     def box(size, colors):
@@ -391,23 +439,37 @@ class GL:
         # cor da textura conforme a posição do mapeamento. Dentro da classe GPU já está
         # implementadado um método para a leitura de imagens.
 
-        # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedFaceSet : ")
-        if coord:
-            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        print("colorPerVertex = {0}".format(colorPerVertex))
-        if colorPerVertex and color and colorIndex:
-            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        if texCoord and texCoordIndex:
-            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
-        if current_texture:
-            image = gpu.GPU.load_texture(current_texture[0])
-            print("\t Matriz com image = {0}".format(image))
-            print("\t Dimensões da image = {0}".format(image.shape))
-        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+        vertices = []
+        i = 0
+        face = []
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        while i < len(coordIndex):
+            index = coordIndex[i]
+            if index == -1:
+                if len(face) >= 3:
+                    v0 = face[0]
+                    for j in range(1, len(face)-1):
+                        v1 = face[j]
+                        v2 = face[j+1]
+                        # Adicionar os vértices do triângulo à lista
+                        vertices.extend(coord[v0*3 : v0*3+3] +
+                                        coord[v1*3 : v1*3+3] +
+                                        coord[v2*3 : v2*3+3])
+                face = []
+            else:
+                face.append(index)
+            i += 1
+
+        if len(face) >= 3:
+            v0 = face[0]
+            for j in range(1, len(face)-1):
+                v1 = face[j]
+                v2 = face[j+1]
+                vertices.extend(coord[v0*3 : v0*3+3] +
+                                coord[v1*3 : v1*3+3] +
+                                coord[v2*3 : v2*3+3])
+
+        GL.triangleSet(vertices, colors)
 
     @staticmethod
     def sphere(radius, colors):
