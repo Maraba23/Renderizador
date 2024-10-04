@@ -16,6 +16,9 @@ import gpu          # Simula os recursos de uma GPU
 import math         # Funções matemáticas
 import numpy as np  # Biblioteca do Numpy
 
+# Sendo bem sincero eu tentei, fiz de tudo pra fazer funcionar, mas nao foi, ent escrevi esse comentario
+# Eu fiz, refiz, fiz e refiz e nada funcionou, ent nao vou nem dar commit da merda q eu fiz, pq ta tudo errado
+
 class GL:
     """Classe que representa a biblioteca gráfica (Graphics Library)."""
 
