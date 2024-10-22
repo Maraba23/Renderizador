@@ -176,44 +176,46 @@ class GL:
     @staticmethod
     def triangleSet(point, colors):
         """Função usada para renderizar TriangleSet."""
-        # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/rendering.html#TriangleSet
-        # Nessa função você receberá pontos no parâmetro point, esses pontos são uma lista
-        # de pontos x, y, e z sempre na ordem. Assim point[0] é o valor da coordenada x do
-        # primeiro ponto, point[1] o valor y do primeiro ponto, point[2] o valor z da
-        # coordenada z do primeiro ponto. Já point[3] é a coordenada x do segundo ponto e
-        # assim por diante.
-        # No TriangleSet os triângulos são informados individualmente, assim os três
-        # primeiros pontos definem um triângulo, os três próximos pontos definem um novo
-        # triângulo, e assim por diante.
-        # O parâmetro colors é um dicionário com os tipos cores possíveis, você pode assumir
-        # inicialmente, para o TriangleSet, o desenho das linhas com a cor emissiva
-        # (emissiveColor), conforme implementar novos materias você deverá suportar outros
-        # tipos de cores.
+        color = [int(255 * colors["emissiveColor"][0]),
+                 int(255 * colors["emissiveColor"][1]),
+                 int(255 * colors["emissiveColor"][2])]
 
-        pontos = []
-        for i in range(0, len(point)-2, 3):
-            p = np.array([[point[i]], [point[i+1]], [point[i+2]], [1]])
+        for i in range(0, len(point), 9):
+            p1 = np.array([[point[i]], [point[i+1]], [point[i+2]], [1]])
+            p2 = np.array([[point[i+3]], [point[i+4]], [point[i+5]], [1]])
+            p3 = np.array([[point[i+6]], [point[i+7]], [point[i+8]], [1]])
 
+            # Aplicar transformações
             transform_matrix = GL.transformation_stack[-1]
-            p_transform = transform_matrix @ p
+            p1_world = transform_matrix @ p1
+            p2_world = transform_matrix @ p2
+            p3_world = transform_matrix @ p3
 
-            p_view = GL.view_matrix @ p_transform
+            # Aplicar visualização
+            p1_view = GL.view_matrix @ p1_world
+            p2_view = GL.view_matrix @ p2_world
+            p3_view = GL.view_matrix @ p3_world
 
-            p_perspective = GL.perspective_matrix @ p_view
-            p_normalized = p_perspective / p_perspective[3]
+            # Aplicar projeção
+            p1_proj = GL.perspective_matrix @ p1_view
+            p2_proj = GL.perspective_matrix @ p2_view
+            p3_proj = GL.perspective_matrix @ p3_view
 
-            map_matrix = np.array([
-                [GL.width/2, 0, 0, GL.width/2],
-                [0, -GL.height/2, 0, GL.height/2],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1]
-            ])
+            # Normalizar
+            p1_ndc = p1_proj / p1_proj[3][0]
+            p2_ndc = p2_proj / p2_proj[3][0]
+            p3_ndc = p3_proj / p3_proj[3][0]
 
-            p_screen = map_matrix @ p_normalized
-            pontos.append(p_screen[0][0])
-            pontos.append(p_screen[1][0])
+            # Converter para coordenadas de tela
+            x0 = int((p1_ndc[0][0] + 1) * (GL.width / 2))
+            y0 = int((1 - p1_ndc[1][0]) * (GL.height / 2))
+            x1 = int((p2_ndc[0][0] + 1) * (GL.width / 2))
+            y1 = int((1 - p2_ndc[1][0]) * (GL.height / 2))
+            x2 = int((p3_ndc[0][0] + 1) * (GL.width / 2))
+            y2 = int((1 - p3_ndc[1][0]) * (GL.height / 2))
 
-        GL.triangleSet2D(pontos, colors)
+            # Desenhar o triângulo
+            GL.fill_triangle(x0, y0, x1, y1, x2, y2, color)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -469,6 +471,53 @@ class GL:
         GL.triangleSet(vertices, colors)
 
     @staticmethod
+    def fill_triangle(x0, y0, x1, y1, x2, y2, color):
+        """Preenche um triângulo na tela usando o algoritmo de varredura."""
+        # Ordenar os pontos pelo y
+        if y0 > y1:
+            x0, y0, x1, y1 = x1, y1, x0, y0
+        if y0 > y2:
+            x0, y0, x2, y2 = x2, y2, x0, y0
+        if y1 > y2:
+            x1, y1, x2, y2 = x2, y2, x1, y1
+
+        # Função auxiliar para desenhar linhas
+        def draw_line(xa, ya, xb, yb):
+            dx = xb - xa
+            dy = yb - ya
+            steps = max(abs(dx), abs(dy))
+            if steps == 0:
+                gpu.GPU.draw_pixel([int(xa), int(ya)], gpu.GPU.RGB8, color)
+                return
+            x_inc = dx / steps
+            y_inc = dy / steps
+            x = xa
+            y = ya
+            for _ in range(int(steps)+1):
+                gpu.GPU.draw_pixel([int(x), int(y)], gpu.GPU.RGB8, color)
+                x += x_inc
+                y += y_inc
+
+        # Preencher o triângulo usando varredura de linhas
+        total_height = y2 - y0
+        if total_height == 0:
+            return
+        for y in range(int(y0), int(y2)+1):
+            segment_height = y2 - y1 if y > y1 else y1 - y0
+            alpha = (y - y0) / total_height if total_height != 0 else 0
+            beta = (y - y0) / (y1 - y0) if y < y1 and y1 - y0 != 0 else (y - y1) / (y2 - y1) if y1 != y2 and y >= y1 else 0
+
+            xa = x0 + (x2 - x0) * alpha
+            xb = x0 + (x1 - x0) * beta if y < y1 else x1 + (x2 - x1) * beta
+
+            if xa > xb:
+                xa, xb = xb, xa
+
+            for x in range(int(xa), int(xb)+1):
+                gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+
+
+    @staticmethod
     def box(size, colors):
         """Função usada para renderizar Boxes."""
         # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/geometry3D.html#Box
@@ -478,13 +527,45 @@ class GL:
         # e Z, respectivamente, e cada valor do tamanho deve ser maior que zero. Para desenha
         # essa caixa você vai provavelmente querer tesselar ela em triângulos, para isso
         # encontre os vértices e defina os triângulos.
+        hx = size[0] / 2
+        hy = size[1] / 2
+        hz = size[2] / 2
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Box : size = {0}".format(size)) # imprime no terminal pontos
-        print("Box : colors = {0}".format(colors)) # imprime no terminal as cores
+        # Definir os 8 vértices do paralelepípedo
+        vertices = [
+            [-hx, -hy, -hz],  # v0
+            [hx, -hy, -hz],   # v1
+            [hx, hy, -hz],    # v2
+            [-hx, hy, -hz],   # v3
+            [-hx, -hy, hz],   # v4
+            [hx, -hy, hz],    # v5
+            [hx, hy, hz],     # v6
+            [-hx, hy, hz]     # v7
+        ]
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        # Definir as faces laterais com a ordem dos vértices ajustada
+        faces = [
+            [4, 5, 6, 7],  # Frente
+            [0, 1, 2, 3],  # Traseira
+            [0, 4, 7, 3],  # Esquerda
+            [1, 5, 6, 2]   # Direita
+        ]
+
+        # Coletar os triângulos
+        triangles = []
+
+        for face in faces:
+            v0 = vertices[face[0]]
+            v1 = vertices[face[1]]
+            v2 = vertices[face[2]]
+            v3 = vertices[face[3]]
+
+            # Primeiro triângulo
+            triangles.extend(v0 + v1 + v2)
+            # Segundo triângulo
+            triangles.extend(v0 + v2 + v3)
+
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def sphere(radius, colors):
@@ -496,9 +577,49 @@ class GL:
         # precisar tesselar ela em triângulos, para isso encontre os vértices e defina
         # os triângulos.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Sphere : radius = {0}".format(radius)) # imprime no terminal o raio da esfera
-        print("Sphere : colors = {0}".format(colors)) # imprime no terminal as cores
+        latitude_bands = 50
+        longitude_bands = 50
+
+        vertices = []
+
+        for lat_number in range(latitude_bands + 1):
+            theta = lat_number * math.pi / latitude_bands
+            sin_theta = math.sin(theta)
+            cos_theta = math.cos(theta)
+
+            for long_number in range(longitude_bands + 1):
+                phi = long_number * 2 * math.pi / longitude_bands
+                sin_phi = math.sin(phi)
+                cos_phi = math.cos(phi)
+
+                x = radius * sin_theta * cos_phi
+                y = radius * cos_theta
+                z = radius * sin_theta * sin_phi
+
+                vertices.append([x, y, z])
+
+        # Coletar triângulos
+        indices = []
+
+        for lat_number in range(latitude_bands):
+            for long_number in range(longitude_bands):
+                first = (lat_number * (longitude_bands + 1)) + long_number
+                second = first + longitude_bands + 1
+
+                indices.extend([
+                    first, second, first + 1,
+                    second, second + 1, first + 1
+                ])
+
+        # Converter vértices e índices em lista de coordenadas para triangleSet
+        triangles = []
+        for i in range(0, len(indices), 3):
+            v0 = vertices[indices[i]]
+            v1 = vertices[indices[i + 1]]
+            v2 = vertices[indices[i + 2]]
+            triangles.extend(v0 + v1 + v2)
+
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def cone(bottomRadius, height, colors):
@@ -511,10 +632,31 @@ class GL:
         # Para desenha esse cone você vai precisar tesselar ele em triângulos, para isso
         # encontre os vértices e defina os triângulos.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Cone : bottomRadius = {0}".format(bottomRadius)) # imprime no terminal o raio da base do cone
-        print("Cone : height = {0}".format(height)) # imprime no terminal a altura do cone
-        print("Cone : colors = {0}".format(colors)) # imprime no terminal as cores
+        N = 20  # Número de segmentos
+        angle_step = 2 * math.pi / N
+
+        # Gerar pontos da base
+        base_points = []
+        for i in range(N):
+            angle = i * angle_step
+            x = bottomRadius * math.cos(angle)
+            z = bottomRadius * math.sin(angle)
+            y = 0  # Base em y=0
+            base_points.append([x, y, z])
+
+        # Ponto do ápice
+        apex = [0, height, 0]
+
+        # Coletar triângulos apenas para as faces laterais
+        triangles = []
+
+        for i in range(N):
+            v0 = base_points[i]
+            v1 = apex
+            v2 = base_points[(i+1) % N]
+            triangles.extend(v0 + v1 + v2)
+
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def cylinder(radius, height, colors):
@@ -527,10 +669,36 @@ class GL:
         # Para desenha esse cilindro você vai precisar tesselar ele em triângulos, para isso
         # encontre os vértices e defina os triângulos.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Cylinder : radius = {0}".format(radius)) # imprime no terminal o raio do cilindro
-        print("Cylinder : height = {0}".format(height)) # imprime no terminal a altura do cilindro
-        print("Cylinder : colors = {0}".format(colors)) # imprime no terminal as cores
+        N = 1000  # Número de segmentos
+        angle_step = 2 * math.pi / N
+
+        # Gerar pontos da base e do topo
+        base_points = []
+        top_points = []
+
+        for i in range(N + 1):
+            angle = i * angle_step
+            x = radius * math.cos(angle)
+            z = radius * math.sin(angle)
+            base_points.append([x, 0, z])
+            top_points.append([x, height, z])
+
+        # Coletar triângulos para a superfície lateral
+        triangles = []
+
+        for i in range(N):
+            # Vértices do quadrilátero lateral
+            p0 = base_points[i]
+            p1 = top_points[i]
+            p2 = base_points[i + 1]
+            p3 = top_points[i + 1]
+
+            # Primeiro triângulo
+            triangles.extend(p0 + p2 + p1)
+            # Segundo triângulo
+            triangles.extend(p1 + p2 + p3)
+
+        GL.triangleSet(triangles, colors)
 
     @staticmethod
     def navigationInfo(headlight):
